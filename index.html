@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Your Mapbox App</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.3.1/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.3.1/mapbox-gl.css" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .legend { background: white; padding: 10px; font-family: Arial, sans-serif; position: absolute; top: 30px; right: 10px; z-index: 100; border-radius: 3px; }
+        .legend h4 { margin: 0 0 10px; }
+        .legend div span { border-radius: 50%; width: 10px; height: 10px; display: inline-block; margin-right: 5px; }
+        .zoom-level-indicator {
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px;
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-family: Arial, sans-serif;
+            z-index: 100;}
+/*             
+        .mapboxgl-popup {
+            max-width: 400px;
+            font:
+                12px/20px 'Helvetica Neue',
+                Arial,
+                Helvetica,
+                sans-serif;
+        } */
+        
+
+        .mapboxgl-popup-content {
+            background-color: white;
+            padding: 5px 8px;
+            line-height: 1.4;
+            font-family: Arial, sans-serif;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.5);
+            font-size: 12px;
+        }
+
+        .mapboxgl-popup-tip {
+            visibility: hidden;
+        }
+
+
+        #g-map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .g-row {
+            padding-top: 1px;
+            padding-bottom: 1px;
+            border-bottom: 1px solid #EEE;
+        }
+
+        .g-row > div {
+            display: inline-block;
+        }
+
+        .g-popup-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .g-row-label {
+            width: 120px;
+        }
+
+        .g-row-pct {
+            width: 52px;
+            text-align: right;
+        }
+
+        .g-row-population {
+            padding-top: 5px;
+            border-bottom: none;
+            font-style: italic;
+            color: #666;
+        }
+
+
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div class="legend" id="legend">
+    <h4>Raça</h4>
+    <div><span style="background-color: #f28cb1;"></span>Branca</div>
+    <div><span style="background-color: #5e5e5e;"></span>Preta</div>
+    <div><span style="background-color: #fff685;"></span>Amarela</div>
+    <div><span style="background-color: #ff8c00;"></span>Parda</div>
+    <div><span style="background-color: #7bccc4;"></span>Indígena</div>
+</div>
+<div class="zoom-level-indicator" id="zoom-level-indicator">Zoom level: 7</div>
+<div id="tooltip-template" style="display: none;">
+    <div class="g-popup-title"><span id="census-tract"></span></div>
+    <div class="g-row">
+        <div class="g-row-label">Preta</div>
+        <div class="g-row-pct" id="preta"></div>
+    </div>
+    <div class="g-row">
+        <div class="g-row-label">Branca</div>
+        <div class="g-row-pct" id="branca"></div>
+    </div>
+    <div class="g-row">
+        <div class="g-row-label">Amarela</div>
+        <div class="g-row-pct" id="amarela"></div>
+    </div>
+    <div class="g-row">
+        <div class="g-row-label">Parda</div>
+        <div class="g-row-pct" id="parda"></div>
+    </div>
+    <div class="g-row">
+        <div class="g-row-label">Indigena</div>
+        <div class="g-row-pct" id="indigena"></div>
+    </div>
+    <div class="g-row g-row-population">
+        <div class="g-row-label"><strong>População</strong></div>
+        <div class="g-row-pct" id="population"></div>
+    </div>
+</div>
+
+<script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiZXNjcml0b3Jpb2RlZGFkb3MiLCJhIjoiY2t3bWdmcHpjMmJ2cTJucWJ4MGQ1Mm1kbiJ9.4hHJX-1pSevYoBbja7Pq4w';
+    var map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/streets-v11',
+        center: [-70.55, -9.02], // Longitude, Latitude
+        zoom: 7, // Zoom level
+        maxzoom: 15,
+        minzoom: 4
+    });
+
+    function updateZoomIndicator() {
+        console.log(map.getZoom())
+        document.getElementById('zoom-level-indicator').innerText = 'Zoom level: ' + map.getZoom().toFixed(0);
+    }
+
+    // ----- ZOOM --------
+    const allowedZooms = [4, 5, 7, 8, 10, 12, 13, 14, 15];
+
+    let lastZoom = 7;
+    let mousePosition;
+    
+    // Function to find the closest allowed zoom level
+    function nextZoom(zoom) {
+        return allowedZooms.reduce((prev, curr) => Math.abs(curr - zoom) < Math.abs(prev - zoom) ? curr : prev);
+    }
+
+    map.on('zoomend', () => {
+        const currentZoom = map.getZoom();
+        const direction  = lastZoom - currentZoom; // negative zoom in, positive zoom out
+        let nextZoom;
+
+        console.log('current', currentZoom, 'last', lastZoom, 'direction', direction)
+
+        if (direction == 0) {return}
+
+        if (direction > 0) {
+            // User intends to zoom out
+            // Find the largest zoom level that is smaller than the lastZoom
+            const lowerZooms = allowedZooms.filter(zoom => zoom < lastZoom);
+            nextZoom = lowerZooms[lowerZooms.length - 1]; // Get the closest smaller zoom level
+        } else {
+            // User intends to zoom in
+            // Find the smallest zoom level that is larger than the lastZoom
+            nextZoom = allowedZooms.find(zoom => zoom > lastZoom);
+        } 
+
+        // If no suitable next zoom level is found (undefined), use the lastZoom as the next zoom
+        nextZoom = nextZoom !== undefined ? nextZoom : lastZoom;
+        console.log('next', nextZoom)
+
+        map.flyTo({
+            'center': [mousePosition.lng, mousePosition.lat],
+            'zoom': nextZoom}, 
+           );
+        
+        lastZoom = nextZoom;
+    });
+
+    // ------- TOOLTIP --------
+
+    const popup = new mapboxgl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        anchor: 'top',
+        offset: 20
+    });
+
+    function fillTooltip(data) {
+        // Find the template and clone it
+        const template = document.getElementById('tooltip-template').cloneNode(true);
+        template.style.display = 'block';
+        template.id = ''; // Clear the id as it's no longer needed for the clone
+
+        // Fill the data
+        template.querySelector('#census-tract').textContent = data.name;
+        template.querySelector('#population').textContent = data.population;
+        template.querySelector('#preta').textContent = Math.round(data.demographics.Preta, 0) + '%';
+        template.querySelector('#branca').textContent = Math.round(data.demographics.Branca, 0) + '%';
+        template.querySelector('#amarela').textContent = Math.round(data.demographics.Amarela, 0) + '%';
+        template.querySelector('#parda').textContent = Math.round(data.demographics.Parda, 0) + '%';
+        template.querySelector('#indigena').textContent = Math.round(data.demographics.Indigena, 0) + '%';
+
+        // Return the filled template
+        return template;
+    }
+
+    // ------- LOADERS ----------
+
+    map.on('load', function () {
+        map.addSource('points', {
+            'type': 'geojson',
+            'data': 'data/ac.geojson'
+        });
+
+        map.addLayer({
+            'id': 'points',
+            'type': 'circle',
+            'source': 'points',
+            'paint': {
+                'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                5, 1, // circle radius is 1 at zoom level 5
+                15, 3 // circle radius is 10 at zoom level 15
+            ],
+                'circle-color': [
+                    'match',
+                    ['get', 'race'],
+                    'branca', '#f28cb1',   // Color for branca
+                    'preta', '#5e5e5e',    // Color for preta
+                    'amarela', '#fff685',  // Color for amarela
+                    'parda', '#ff8c00',    // Color for parda
+                    'indigena', '#7bccc4', // Color for indigena
+                    /* other */ '#ccc'      // Default color
+                ]
+            }
+        });
+
+
+        map.addSource('setores', {
+            'type': 'geojson',
+            'data': 'data/setor_censitario.geojson',
+            'generateId': true
+        });
+
+
+        map.addLayer(
+            {
+                'id': 'setores-fill',
+                'type': 'fill',
+                'source': 'setores',
+                'paint': {
+                    'fill-opacity': 0,
+                },
+            }
+        )
+
+        map.addLayer(
+            {
+                'id': 'setores-border',
+                'type': 'line',
+                'source': 'setores',
+                'paint': {
+                    'line-color':  'black',
+                    'line-width': 2,
+                    'line-opacity': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        1,0]
+                },
+            });
+        
+        map.addSource('municipios', {
+            'type': 'geojson',
+            'data': 'data/municipio.geojson',
+            'generateId': true
+        });
+
+
+        map.addLayer(
+            {
+                'id': 'municipios-fill',
+                'type': 'fill',
+                'source': 'municipios',
+                'paint': {
+                    'fill-opacity': 0,
+                }
+            }
+        )
+
+        map.addLayer(
+            {
+                'id': 'municipios-border',
+                'type': 'line',
+                'source': 'municipios',
+                'paint': {
+                    'line-color':  'black',
+                    'line-width': 2,
+                    'line-opacity': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        1,0]
+                },
+            }
+        )
+
+        var initialZoom = map.getZoom();
+        updateZoomIndicator();
+    });
+
+            // Create a popup, but don't add it to the map yet.
+
+
+    let censusTractID = null;
+
+    map.on('mousemove', 'setores-fill', (event) => {
+        map.getCanvas().style.cursor = 'pointer';
+        mousePosition = event.lngLat;
+        if (event.features.length === 0) return;
+        
+        // ------ BORDER EFFECT --------- //
+        if (map.getZoom() >= 10) {
+            if (censusTractID) {
+                map.removeFeatureState({
+                source: 'setores',
+                id: censusTractID
+                });
+            }
+            
+            censusTractID = event.features[0].id;
+        
+        
+            map.setFeatureState(
+                {
+                source: 'setores',
+                id: censusTractID
+                },
+                {
+                hover: true
+                }
+            );
+        
+        
+            // ------ TOOLTIP EFFECT --------- //
+
+            const properties = event.features[0].properties;
+            
+            // Assuming properties contains the data structure for the tooltip
+            const tooltipData = {
+                name: 'Setor Censitário',
+                population: properties.populacao,
+                demographics: {
+                    Preta: properties.preta,
+                    Branca: properties.branca,
+                    Amarela: properties.amarela,
+                    Parda: properties.parda,
+                    Indigena: properties.indigena
+                }
+            };
+            
+            const tooltipElement = fillTooltip(tooltipData); // Call the function and get the filled template
+            const coordinates = event.lngLat;
+            popup.setLngLat(coordinates).setDOMContent(tooltipElement).addTo(map);
+        }
+    });
+
+    map.on('mouseleave', 'setores-fill', () => {
+        if (censusTractID) {
+            map.setFeatureState(
+                {
+                source: 'setores',
+                id: censusTractID
+                },
+                {
+                hover: false
+                }
+            );
+        }
+        // Reset the cursor style
+        map.getCanvas().style.cursor = '';
+        popup.remove();
+    });
+
+    let municipalityID = null;
+    map.on('mousemove', 'municipios-fill', (event) => {
+
+        map.getCanvas().style.cursor = 'pointer';
+        mousePosition = event.lngLat;
+        if (event.features.length === 0) return;
+
+        // ------ BORDER EFFECT --------- //
+        if (map.getZoom() < 10) {
+            
+            if (municipalityID) {
+                map.removeFeatureState({
+                source: 'municipios',
+                id: municipalityID
+                });
+            }
+            
+            municipalityID = event.features[0].id;
+
+            map.setFeatureState(
+                {
+                source: 'municipios',
+                id: municipalityID
+                },
+                {
+                hover: true
+                }
+            );
+        
+            // ------ TOOLTIP EFFECT --------- //
+
+            const properties = event.features[0].properties;
+            
+            // Assuming properties contains the data structure for the tooltip
+            const tooltipData = {
+                name: properties.municipio,
+                population: properties.populacao,
+                demographics: {
+                    Preta: properties.preta,
+                    Branca: properties.branca,
+                    Amarela: properties.amarela,
+                    Parda: properties.parda,
+                    Indigena: properties.indigena
+                }
+            };
+            
+            const tooltipElement = fillTooltip(tooltipData); // Call the function and get the filled template
+            const coordinates = event.lngLat;
+            popup.setLngLat(coordinates).setDOMContent(tooltipElement).addTo(map);
+        }
+    });
+    
+    map.on('mouseleave', 'setores-fill', () => {
+        if (municipalityID) {
+            map.setFeatureState(
+                {
+                source: 'municipios',
+                id: municipalityID
+                },
+                {
+                hover: false
+                }
+            );
+        }
+        // Reset the cursor style
+        map.getCanvas().style.cursor = '';
+        popup.remove();
+    });
+
+    
+    
+    map.on('zoom', function () {
+        updateZoomIndicator();
+        // Update the opacity of the dots on zoom
+    });
+
+</script>
+</body>
+</html>
